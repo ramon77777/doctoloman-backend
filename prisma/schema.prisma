@@ -1,0 +1,282 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum UserRole {
+  PATIENT
+  PROFESSIONAL
+  ADMIN
+}
+
+enum AppointmentStatus {
+  PENDING
+  CONFIRMED
+  DECLINED_BY_PROFESSIONAL
+  CANCELLED_BY_PATIENT
+  CANCELLED_BY_PROFESSIONAL
+  COMPLETED
+  NO_SHOW
+}
+
+enum TeleconsultationStatus {
+  SCHEDULED
+  WAITING
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+enum MedicalRecordType {
+  PRESCRIPTION
+  LAB_RESULT
+  IMAGING
+  CERTIFICATE
+  OTHER
+}
+
+model User {
+  id           String   @id @default(uuid())
+  phone        String   @unique
+  name         String
+  passwordHash String
+  role         UserRole
+  isActive     Boolean  @default(true)
+
+  patientProfile      PatientProfile?
+  professionalProfile ProfessionalProfile?
+  medicalRecords      MedicalRecord[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([role])
+}
+
+model PatientProfile {
+  id     String @id @default(uuid())
+  userId String @unique
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  firstName String
+  lastName  String
+  phone     String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model ProfessionalProfile {
+  id     String @id @default(uuid())
+  userId String @unique
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  displayName          String
+  specialty            String
+  structureName        String?
+  phone                String
+  city                 String?
+  area                 String?
+  address              String?
+  bio                  String?
+  consultationFeeLabel String?
+  isVerified           Boolean @default(false)
+
+  appointmentDurationMinutes Int @default(30)
+
+  appointmentReasons AppointmentReason[]
+  schedules          ProfessionalSchedule[]
+  appointments       Appointment[]
+  teleconsultations  TeleconsultationSession[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([specialty])
+  @@index([city])
+  @@index([area])
+}
+
+model AppointmentReason {
+  id             String @id @default(uuid())
+  professionalId String
+
+  professional ProfessionalProfile @relation(fields: [professionalId], references: [id], onDelete: Cascade)
+
+  label           String
+  durationMinutes Int
+  position        Int     @default(0)
+  isActive        Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([professionalId, label])
+  @@index([professionalId])
+}
+
+model ProfessionalSchedule {
+  id             String @id @default(uuid())
+  professionalId String
+
+  professional ProfessionalProfile @relation(fields: [professionalId], references: [id], onDelete: Cascade)
+
+  weekday Int
+  label   String
+  isOpen  Boolean @default(false)
+
+  slots ProfessionalScheduleSlot[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([professionalId, weekday])
+  @@index([professionalId])
+}
+
+model ProfessionalScheduleSlot {
+  id         String @id @default(uuid())
+  scheduleId String
+
+  schedule ProfessionalSchedule @relation(fields: [scheduleId], references: [id], onDelete: Cascade)
+
+  startTime String
+  endTime   String
+  position  Int    @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([scheduleId])
+}
+
+model Appointment {
+  id String @id @default(uuid())
+
+  professionalId String
+  professional   ProfessionalProfile @relation(fields: [professionalId], references: [id], onDelete: Restrict)
+
+  patientName  String
+  patientPhone String
+
+  day    DateTime
+  slot   String
+  reason String
+
+  status AppointmentStatus @default(PENDING)
+
+  consentAccepted   Boolean   @default(false)
+  consentVersion    String?
+  consentAcceptedAt DateTime?
+
+  teleconsultation TeleconsultationSession?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([professionalId])
+  @@index([day])
+  @@index([status])
+}
+
+model TeleconsultationSession {
+  id            String @id @default(uuid())
+  appointmentId String @unique
+
+  appointment Appointment @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+
+  professionalId String
+  professional   ProfessionalProfile @relation(fields: [professionalId], references: [id], onDelete: Restrict)
+
+  patientName  String
+  patientPhone String
+
+  scheduledAt DateTime
+  reason      String
+
+  status TeleconsultationStatus @default(SCHEDULED)
+
+  consentAccepted   Boolean   @default(false)
+  consentAcceptedAt DateTime?
+
+  roomUrl   String?
+  startedAt DateTime?
+  endedAt   DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([professionalId])
+  @@index([scheduledAt])
+  @@index([status])
+}
+
+model Pharmacy {
+  id        String  @id @default(uuid())
+  name      String
+  phone     String  @unique
+  city      String
+  area      String?
+  address   String?
+  latitude  Float?
+  longitude Float?
+  isOnDuty  Boolean @default(false)
+  isActive  Boolean @default(true)
+
+  dutyPeriods PharmacyDutyPeriod[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([city])
+  @@index([area])
+  @@index([isOnDuty])
+  @@index([isActive])
+}
+
+model PharmacyDutyPeriod {
+  id         String @id @default(uuid())
+  pharmacyId String
+
+  pharmacy Pharmacy @relation(fields: [pharmacyId], references: [id], onDelete: Cascade)
+
+  startsAt DateTime
+  endsAt   DateTime
+  note     String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([pharmacyId])
+  @@index([startsAt])
+  @@index([endsAt])
+}
+
+model MedicalRecord {
+  id        String @id @default(uuid())
+  patientId String
+
+  patient User @relation(fields: [patientId], references: [id], onDelete: Cascade)
+
+  title       String
+  type        MedicalRecordType @default(OTHER)
+  description String?
+
+  originalFileName String
+  storedFileName   String
+  mimeType         String
+  sizeBytes        Int
+  filePath         String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([patientId])
+  @@index([type])
+  @@index([createdAt])
+}
