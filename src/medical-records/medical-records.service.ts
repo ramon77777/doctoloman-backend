@@ -7,14 +7,18 @@ import {
 import { MedicalRecordType, UserRole } from '@prisma/client';
 import { existsSync } from 'fs';
 import { unlink } from 'fs/promises';
-import { join, resolve } from 'path';
+import { resolve } from 'path';
+import type { AuthenticatedUser } from '../auth/types/authenticated-user.type';
+import { MedicalAccessService } from '../medical-access/medical-access.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateMedicalRecordDto } from './dto/create-medical-record.dto';
-import type { AuthenticatedUser } from '../auth/types/authenticated-user.type';
 
 @Injectable()
 export class MedicalRecordsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly medicalAccessService: MedicalAccessService,
+  ) {}
 
   async upload(
     user: AuthenticatedUser,
@@ -124,6 +128,126 @@ export class MedicalRecordsService {
     return {
       deleted: true,
       id: record.id,
+    };
+  }
+
+  async listForAuthorizedProfessional(
+    user: AuthenticatedUser,
+    patientId: string,
+  ) {
+    const normalizedPatientId = this.cleanText(patientId);
+
+    await this.medicalAccessService.assertProfessionalCanAccessPatient(
+      user,
+      normalizedPatientId,
+    );
+
+    const items = await this.prisma.medicalRecord.findMany({
+      where: {
+        patientId: normalizedPatientId,
+      },
+      orderBy: {
+        createdAt: 'desc',
+      },
+    });
+
+    await this.medicalAccessService.logProfessionalOpenPatientRecords({
+      user,
+      patientId: normalizedPatientId,
+    });
+
+    return {
+      items,
+      count: items.length,
+    };
+  }
+
+  async findForAuthorizedProfessional(
+    user: AuthenticatedUser,
+    patientId: string,
+    recordId: string,
+  ) {
+    const normalizedPatientId = this.cleanText(patientId);
+    const normalizedRecordId = this.cleanText(recordId);
+
+    if (!normalizedRecordId) {
+      throw new BadRequestException('Identifiant document invalide.');
+    }
+
+    await this.medicalAccessService.assertProfessionalCanAccessPatient(
+      user,
+      normalizedPatientId,
+    );
+
+    const record = await this.prisma.medicalRecord.findFirst({
+      where: {
+        id: normalizedRecordId,
+        patientId: normalizedPatientId,
+      },
+    });
+
+    if (!record) {
+      throw new NotFoundException('Document médical introuvable.');
+    }
+
+    await this.medicalAccessService.logProfessionalOpenMedicalRecord({
+      user,
+      patientId: normalizedPatientId,
+      medicalRecordId: record.id,
+      medicalRecordTitle: record.title,
+      isDownload: false,
+    });
+
+    return record;
+  }
+
+  async getProfessionalDownloadInfo(
+    user: AuthenticatedUser,
+    patientId: string,
+    recordId: string,
+  ) {
+    const normalizedPatientId = this.cleanText(patientId);
+    const normalizedRecordId = this.cleanText(recordId);
+
+    if (!normalizedRecordId) {
+      throw new BadRequestException('Identifiant document invalide.');
+    }
+
+    await this.medicalAccessService.assertProfessionalCanAccessPatient(
+      user,
+      normalizedPatientId,
+    );
+
+    const record = await this.prisma.medicalRecord.findFirst({
+      where: {
+        id: normalizedRecordId,
+        patientId: normalizedPatientId,
+      },
+    });
+
+    if (!record) {
+      throw new NotFoundException('Document médical introuvable.');
+    }
+
+    const absolutePath = this.resolveStoredPath(record.filePath);
+
+    if (!existsSync(absolutePath)) {
+      throw new NotFoundException(
+        'Le fichier associé à ce document est introuvable.',
+      );
+    }
+
+    await this.medicalAccessService.logProfessionalOpenMedicalRecord({
+      user,
+      patientId: normalizedPatientId,
+      medicalRecordId: record.id,
+      medicalRecordTitle: record.title,
+      isDownload: true,
+    });
+
+    return {
+      record,
+      absolutePath,
     };
   }
 

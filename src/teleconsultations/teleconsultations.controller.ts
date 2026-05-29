@@ -1,11 +1,4 @@
-import {
-  Controller,
-  Get,
-  Param,
-  Patch,
-  UseGuards,
-  Body,
-} from '@nestjs/common';
+import { Controller, Get, Param, Patch, UseGuards, Body } from '@nestjs/common';
 import {
   ApiBearerAuth,
   ApiOperation,
@@ -35,6 +28,21 @@ export class TeleconsultationsController {
     return this.teleconsultationsService.listMine(user);
   }
 
+  @Get(':id/room')
+  @ApiOperation({
+    summary: 'Récupérer la salle vidéo sécurisée d’une téléconsultation',
+  })
+  @ApiParam({
+    name: 'id',
+    description: 'Identifiant de la téléconsultation',
+  })
+  getRoomForSession(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+  ) {
+    return this.teleconsultationsService.getRoomForSession(user, id);
+  }
+
   @Get(':id')
   @ApiOperation({
     summary: 'Récupérer le détail d’une téléconsultation',
@@ -43,10 +51,7 @@ export class TeleconsultationsController {
     name: 'id',
     description: 'Identifiant de la téléconsultation',
   })
-  getMineById(
-    @CurrentUser() user: AuthenticatedUser,
-    @Param('id') id: string,
-  ) {
+  getMineById(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
     return this.teleconsultationsService.getMineById(user, id);
   }
 
@@ -73,10 +78,7 @@ export class TeleconsultationsController {
     name: 'id',
     description: 'Identifiant de la téléconsultation',
   })
-  markWaiting(
-    @CurrentUser() user: AuthenticatedUser,
-    @Param('id') id: string,
-  ) {
+  markWaiting(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
     return this.teleconsultationsService.markWaiting(user, id);
   }
 
@@ -88,10 +90,7 @@ export class TeleconsultationsController {
     name: 'id',
     description: 'Identifiant de la téléconsultation',
   })
-  start(
-    @CurrentUser() user: AuthenticatedUser,
-    @Param('id') id: string,
-  ) {
+  start(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
     return this.teleconsultationsService.start(user, id);
   }
 
@@ -103,10 +102,7 @@ export class TeleconsultationsController {
     name: 'id',
     description: 'Identifiant de la téléconsultation',
   })
-  end(
-    @CurrentUser() user: AuthenticatedUser,
-    @Param('id') id: string,
-  ) {
+  end(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
     return this.teleconsultationsService.end(user, id);
   }
 
@@ -118,10 +114,7 @@ export class TeleconsultationsController {
     name: 'id',
     description: 'Identifiant de la téléconsultation',
   })
-  cancel(
-    @CurrentUser() user: AuthenticatedUser,
-    @Param('id') id: string,
-  ) {
+  cancel(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
     return this.teleconsultationsService.cancel(user, id);
   }
 

@@ -4,13 +4,24 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { UserRole } from '@prisma/client';
+import { Prisma, UserRole } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import type { AuthenticatedUser } from '../auth/types/authenticated-user.type';
 import { ProfessionalSearchQueryDto } from './dto/professional-search-query.dto';
 import { UpdateProfessionalProfileDto } from './dto/update-professional-profile.dto';
 import { UpdateProfessionalReasonsDto } from './dto/update-professional-reasons.dto';
 import { UpdateProfessionalSchedulesDto } from './dto/update-professional-schedules.dto';
+
+type ProfessionalWithPublicRelations = Prisma.ProfessionalProfileGetPayload<{
+  include: {
+    appointmentReasons: true;
+    schedules: {
+      include: {
+        slots: true;
+      };
+    };
+  };
+}>;
 
 @Injectable()
 export class ProfessionalsService {
@@ -21,58 +32,69 @@ export class ProfessionalsService {
     const specialty = this.cleanOptional(query.specialty);
     const city = this.cleanOptional(query.city);
     const area = this.cleanOptional(query.area);
+    const location = this.cleanOptional(query.location);
+
+    const andFilters: Prisma.ProfessionalProfileWhereInput[] = [];
+
+    if (specialty) {
+      andFilters.push({
+        specialty: {
+          contains: specialty,
+          mode: 'insensitive',
+        },
+      });
+    }
+
+    if (city) {
+      andFilters.push(this.buildLocationFilter(city));
+    }
+
+    if (area) {
+      andFilters.push({
+        area: {
+          contains: area,
+          mode: 'insensitive',
+        },
+      });
+    }
+
+    if (location) {
+      andFilters.push(this.buildLocationFilter(location));
+    }
+
+    if (q) {
+      andFilters.push({
+        OR: [
+          {
+            displayName: {
+              contains: q,
+              mode: 'insensitive',
+            },
+          },
+          {
+            specialty: {
+              contains: q,
+              mode: 'insensitive',
+            },
+          },
+          {
+            structureName: {
+              contains: q,
+              mode: 'insensitive',
+            },
+          },
+        ],
+      });
+    }
 
     const professionals = await this.prisma.professionalProfile.findMany({
       where: {
         user: {
           isActive: true,
         },
-        ...(specialty
+        ...(andFilters.length > 0
           ? {
-              specialty: {
-                contains: specialty,
-                mode: 'insensitive',
-              },
-            }
-          : {}),
-        ...(city
-          ? {
-              city: {
-                contains: city,
-                mode: 'insensitive',
-              },
-            }
-          : {}),
-        ...(area
-          ? {
-              area: {
-                contains: area,
-                mode: 'insensitive',
-              },
-            }
-          : {}),
-        ...(q
-          ? {
-              OR: [
-                {
-                  displayName: {
-                    contains: q,
-                    mode: 'insensitive',
-                  },
-                },
-                {
-                  specialty: {
-                    contains: q,
-                    mode: 'insensitive',
-                  },
-                },
-                {
-                  structureName: {
-                    contains: q,
-                    mode: 'insensitive',
-                  },
-                },
-              ],
+              AND: andFilters,
             }
           : {}),
       },
@@ -148,6 +170,8 @@ export class ProfessionalsService {
       },
       select: {
         id: true,
+        displayName: true,
+        phone: true,
       },
     });
 
@@ -174,32 +198,79 @@ export class ProfessionalsService {
         ? undefined
         : this.requiredText(dto.specialty, 'Spécialité requise.');
 
-    const updated = await this.prisma.professionalProfile.update({
-      where: {
-        id: professional.id,
-      },
-      data: {
-        ...(displayName !== undefined ? { displayName } : {}),
-        ...(specialty !== undefined ? { specialty } : {}),
-        ...(dto.structureName !== undefined
-          ? { structureName: this.optionalText(dto.structureName) }
-          : {}),
-        ...(phone !== undefined ? { phone } : {}),
-        ...(dto.city !== undefined ? { city: this.optionalText(dto.city) } : {}),
-        ...(dto.area !== undefined ? { area: this.optionalText(dto.area) } : {}),
-        ...(dto.address !== undefined
-          ? { address: this.optionalText(dto.address) }
-          : {}),
-        ...(dto.bio !== undefined ? { bio: this.optionalMultiline(dto.bio) } : {}),
-        ...(dto.consultationFeeLabel !== undefined
-          ? { consultationFeeLabel: this.optionalText(dto.consultationFeeLabel) }
-          : {}),
-        ...(dto.appointmentDurationMinutes !== undefined
-          ? { appointmentDurationMinutes: dto.appointmentDurationMinutes }
-          : {}),
-        ...(dto.isVerified !== undefined ? { isVerified: dto.isVerified } : {}),
-      },
-      include: this.professionalInclude(),
+    const languages =
+      dto.languages === undefined
+        ? undefined
+        : this.normalizeLanguages(dto.languages);
+
+    if (phone !== undefined) {
+      const phoneOwner = await this.prisma.user.findUnique({
+        where: {
+          phone,
+        },
+        select: {
+          id: true,
+        },
+      });
+
+      if (phoneOwner && phoneOwner.id !== currentUser.id) {
+        throw new BadRequestException('Ce téléphone est déjà utilisé.');
+      }
+    }
+
+    const updated = await this.prisma.$transaction(async (tx) => {
+      if (displayName !== undefined || phone !== undefined) {
+        await tx.user.update({
+          where: {
+            id: currentUser.id,
+          },
+          data: {
+            ...(displayName !== undefined ? { name: displayName } : {}),
+            ...(phone !== undefined ? { phone } : {}),
+          },
+        });
+      }
+
+      return tx.professionalProfile.update({
+        where: {
+          id: professional.id,
+        },
+        data: {
+          ...(displayName !== undefined ? { displayName } : {}),
+          ...(specialty !== undefined ? { specialty } : {}),
+          ...(dto.structureName !== undefined
+            ? { structureName: this.optionalText(dto.structureName) }
+            : {}),
+          ...(phone !== undefined ? { phone } : {}),
+          ...(dto.city !== undefined
+            ? { city: this.optionalText(dto.city) }
+            : {}),
+          ...(dto.area !== undefined
+            ? { area: this.optionalText(dto.area) }
+            : {}),
+          ...(dto.address !== undefined
+            ? { address: this.optionalText(dto.address) }
+            : {}),
+          ...(dto.bio !== undefined
+            ? { bio: this.optionalMultiline(dto.bio) }
+            : {}),
+          ...(languages !== undefined ? { languages } : {}),
+          ...(dto.consultationFeeLabel !== undefined
+            ? {
+                consultationFeeLabel: this.optionalText(
+                  dto.consultationFeeLabel,
+                ),
+              }
+            : {}),
+          ...(dto.appointmentDurationMinutes !== undefined
+            ? { appointmentDurationMinutes: dto.appointmentDurationMinutes }
+            : {}),
+          ...(dto.isVerified !== undefined
+            ? { isVerified: dto.isVerified }
+            : {}),
+        },
+        include: this.professionalInclude(),
+      });
     });
 
     return {
@@ -213,7 +284,9 @@ export class ProfessionalsService {
   ) {
     this.ensureProfessional(currentUser);
 
-    const professional = await this.getCurrentProfessionalOrThrow(currentUser.id);
+    const professional = await this.getCurrentProfessionalOrThrow(
+      currentUser.id,
+    );
 
     const normalizedReasons = dto.reasons.map((reason, index) => ({
       label: this.requiredText(reason.label, 'Libellé du motif requis.'),
@@ -260,7 +333,9 @@ export class ProfessionalsService {
   ) {
     this.ensureProfessional(currentUser);
 
-    const professional = await this.getCurrentProfessionalOrThrow(currentUser.id);
+    const professional = await this.getCurrentProfessionalOrThrow(
+      currentUser.id,
+    );
 
     this.ensureUniqueWeekdays(dto.schedules.map((day) => day.weekday));
 
@@ -393,13 +468,11 @@ export class ProfessionalsService {
 
   private ensureProfessional(currentUser: AuthenticatedUser) {
     if (!currentUser || currentUser.role !== UserRole.PROFESSIONAL) {
-      throw new ForbiddenException(
-        'Accès réservé aux comptes professionnels.',
-      );
+      throw new ForbiddenException('Accès réservé aux comptes professionnels.');
     }
   }
 
-  private toPublicProfessional(professional: any) {
+  private toPublicProfessional(professional: ProfessionalWithPublicRelations) {
     return {
       id: professional.id,
       displayName: professional.displayName,
@@ -410,6 +483,11 @@ export class ProfessionalsService {
       area: professional.area,
       address: professional.address,
       bio: professional.bio,
+      languages:
+        Array.isArray(professional.languages) &&
+        professional.languages.length > 0
+          ? professional.languages
+          : ['Français'],
       consultationFeeLabel: professional.consultationFeeLabel,
       isVerified: professional.isVerified,
       appointmentDurationMinutes: professional.appointmentDurationMinutes,
@@ -420,7 +498,7 @@ export class ProfessionalsService {
     };
   }
 
-  private toProfessionalProfile(professional: any) {
+  private toProfessionalProfile(professional: ProfessionalWithPublicRelations) {
     return this.toPublicProfessional(professional);
   }
 
@@ -452,6 +530,30 @@ export class ProfessionalsService {
 
       seen.add(weekday);
     }
+  }
+
+  private normalizeLanguages(values: string[]): string[] {
+    const seen = new Set<string>();
+    const result: string[] = [];
+
+    for (const raw of values) {
+      const value = this.cleanText(raw ?? '');
+
+      if (!value) {
+        continue;
+      }
+
+      const key = value.toLowerCase();
+
+      if (seen.has(key)) {
+        continue;
+      }
+
+      seen.add(key);
+      result.push(value);
+    }
+
+    return result.length > 0 ? result : ['Français'];
   }
 
   private validateSlots(
@@ -526,6 +628,45 @@ export class ProfessionalsService {
     }
 
     return cleaned;
+  }
+
+  private buildLocationFilter(
+    location?: string,
+  ): Prisma.ProfessionalProfileWhereInput {
+    const cleaned = this.cleanOptional(location);
+
+    if (!cleaned) {
+      return {};
+    }
+
+    return {
+      OR: [
+        {
+          city: {
+            contains: cleaned,
+            mode: 'insensitive',
+          },
+        },
+        {
+          area: {
+            contains: cleaned,
+            mode: 'insensitive',
+          },
+        },
+        {
+          address: {
+            contains: cleaned,
+            mode: 'insensitive',
+          },
+        },
+        {
+          structureName: {
+            contains: cleaned,
+            mode: 'insensitive',
+          },
+        },
+      ],
+    };
   }
 
   private cleanOptional(value?: string): string | undefined {

@@ -30,4 +30,13 @@ export class ProfessionalSearchQueryDto {
   @IsOptional()
   @IsString()
   area?: string;
+
+  @ApiPropertyOptional({
+    example: 'Bingerville',
+    description:
+      'Recherche libre de localisation : ville, commune, quartier, adresse ou structure.',
+  })
+  @IsOptional()
+  @IsString()
+  location?: string;
 }

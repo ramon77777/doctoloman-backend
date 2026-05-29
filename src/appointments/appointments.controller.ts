@@ -1,5 +1,20 @@
-import { Body, Controller, Get, Param, Patch, Post, UseGuards } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  Patch,
+  Post,
+  Query,
+  UseGuards,
+} from '@nestjs/common';
+import {
+  ApiBearerAuth,
+  ApiOperation,
+  ApiQuery,
+  ApiTags,
+} from '@nestjs/swagger';
+
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import type { AuthenticatedUser } from '../auth/types/authenticated-user.type';
@@ -25,6 +40,36 @@ export class AppointmentsController {
     return this.appointmentsService.create(user, dto);
   }
 
+  @Get()
+  @ApiOperation({
+    summary:
+      'Lister les rendez-vous selon le rôle connecté : patient, professionnel ou admin',
+  })
+  @ApiQuery({ name: 'practitionerId', required: false })
+  @ApiQuery({ name: 'status', required: false })
+  @ApiQuery({ name: 'from', required: false })
+  @ApiQuery({ name: 'to', required: false })
+  @ApiQuery({ name: 'page', required: false })
+  @ApiQuery({ name: 'pageSize', required: false })
+  listForCurrentUser(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query('practitionerId') practitionerId?: string,
+    @Query('status') status?: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+    @Query('page') page?: string,
+    @Query('pageSize') pageSize?: string,
+  ) {
+    return this.appointmentsService.listForCurrentUser(user, {
+      practitionerId,
+      status,
+      from,
+      to,
+      page,
+      pageSize,
+    });
+  }
+
   @Get('me')
   @ApiOperation({
     summary: 'Lister les rendez-vous du patient connecté',
@@ -39,6 +84,19 @@ export class AppointmentsController {
   })
   listProfessionalMine(@CurrentUser() user: AuthenticatedUser) {
     return this.appointmentsService.listProfessionalMine(user);
+  }
+
+  @Patch(':id/reschedule')
+  @ApiOperation({
+    summary:
+      'Reprogrammer un rendez-vous côté patient et repasser la demande en attente',
+  })
+  reschedule(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+    @Body() body: { day?: string; slot?: string },
+  ) {
+    return this.appointmentsService.reschedule(user, id, body);
   }
 
   @Patch(':id/status')

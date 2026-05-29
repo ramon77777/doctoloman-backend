@@ -38,6 +38,48 @@ enum MedicalRecordType {
   OTHER
 }
 
+enum MedicalAccessAuditAction {
+  GRANT_ACCESS
+  REVOKE_ACCESS
+  OPEN_PATIENT_MEDICAL_RECORDS
+  OPEN_MEDICAL_RECORD
+  DOWNLOAD_MEDICAL_RECORD
+}
+
+enum PushDevicePlatform {
+  ANDROID
+  IOS
+  WEB
+  UNKNOWN
+}
+
+enum NotificationChannel {
+  PUSH
+  SMS
+  EMAIL
+  IN_APP
+}
+
+enum NotificationStatus {
+  PENDING
+  SENT
+  FAILED
+  READ
+  CANCELLED
+}
+
+enum NotificationType {
+  APPOINTMENT_REQUESTED
+  APPOINTMENT_CONFIRMED
+  APPOINTMENT_REMINDER
+  APPOINTMENT_CANCELLED
+  TELECONSULTATION_REMINDER
+  TELECONSULTATION_STARTED
+  TELECONSULTATION_PATIENT_WAITING
+  MEDICAL_ACCESS_GRANTED
+  SYSTEM
+}
+
 model User {
   id           String   @id @default(uuid())
   phone        String   @unique
@@ -50,8 +92,15 @@ model User {
   professionalProfile ProfessionalProfile?
   medicalRecords      MedicalRecord[]
 
+  pushDevices   PushDevice[]
+  notifications AppNotification[]
+
+  medicalAccessesGranted MedicalAccess[]      @relation("MedicalAccessPatient")
+  medicalAccessAudits    MedicalAccessAudit[] @relation("MedicalAccessAuditPatient")
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
 
   @@index([role])
 }
@@ -65,6 +114,20 @@ model PatientProfile {
   firstName String
   lastName  String
   phone     String
+
+  city      String?
+  district  String?
+  address   String?
+
+  birthDate DateTime?
+  gender    String?
+
+  bloodGroup   String?
+  allergies    String?
+  medicalNotes String?
+
+  emergencyContactName  String?
+  emergencyContactPhone String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -84,6 +147,7 @@ model ProfessionalProfile {
   area                 String?
   address              String?
   bio                  String?
+  languages            String[] @default(["Français"])
   consultationFeeLabel String?
   isVerified           Boolean @default(false)
 
@@ -93,6 +157,9 @@ model ProfessionalProfile {
   schedules          ProfessionalSchedule[]
   appointments       Appointment[]
   teleconsultations  TeleconsultationSession[]
+
+  medicalAccesses MedicalAccess[]      @relation("MedicalAccessProfessional")
+  medicalAudits   MedicalAccessAudit[] @relation("MedicalAccessAuditProfessional")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -257,6 +324,27 @@ model PharmacyDutyPeriod {
   @@index([endsAt])
 }
 
+model PharmacyNearbySearchCache {
+  id String @id @default(uuid())
+
+  cacheKey  String @unique
+  latitude  Float
+  longitude Float
+  radiusKm  Float
+
+  source   String @default("OPENSTREETMAP")
+  response Json
+
+  expiresAt DateTime
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([expiresAt])
+  @@index([latitude, longitude])
+  @@index([radiusKm])
+}
+
 model MedicalRecord {
   id        String @id @default(uuid())
   patientId String
@@ -273,10 +361,114 @@ model MedicalRecord {
   sizeBytes        Int
   filePath         String
 
+  accessAudits MedicalAccessAudit[]
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@index([patientId])
   @@index([type])
+  @@index([createdAt])
+}
+
+model MedicalAccess {
+  id             String @id @default(uuid())
+  patientId      String
+  professionalId String
+
+  patient      User                @relation("MedicalAccessPatient", fields: [patientId], references: [id], onDelete: Cascade)
+  professional ProfessionalProfile @relation("MedicalAccessProfessional", fields: [professionalId], references: [id], onDelete: Cascade)
+
+  grantedAt DateTime  @default(now())
+  revokedAt DateTime?
+
+  audits MedicalAccessAudit[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([patientId, professionalId])
+  @@index([patientId])
+  @@index([professionalId])
+  @@index([revokedAt])
+}
+
+model MedicalAccessAudit {
+  id String @id @default(uuid())
+
+  action MedicalAccessAuditAction
+
+  patientId      String
+  professionalId String
+
+  patient      User                @relation("MedicalAccessAuditPatient", fields: [patientId], references: [id], onDelete: Cascade)
+  professional ProfessionalProfile @relation("MedicalAccessAuditProfessional", fields: [professionalId], references: [id], onDelete: Cascade)
+
+  medicalAccessId String?
+  medicalAccess   MedicalAccess? @relation(fields: [medicalAccessId], references: [id], onDelete: SetNull)
+
+  medicalRecordId    String?
+  medicalRecord      MedicalRecord? @relation(fields: [medicalRecordId], references: [id], onDelete: SetNull)
+  medicalRecordTitle String?
+
+  createdAt DateTime @default(now())
+
+  @@index([patientId])
+  @@index([professionalId])
+  @@index([medicalAccessId])
+  @@index([medicalRecordId])
+  @@index([action])
+  @@index([createdAt])
+}
+
+model PushDevice {
+  id     String @id @default(uuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  token      String             @unique
+  platform   PushDevicePlatform @default(UNKNOWN)
+  deviceName String?
+  appVersion String?
+
+  isActive Boolean   @default(true)
+  lastSeenAt DateTime @default(now())
+  revokedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+  @@index([platform])
+  @@index([isActive])
+  @@index([lastSeenAt])
+}
+
+model AppNotification {
+  id     String @id @default(uuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  type    NotificationType
+  channel NotificationChannel @default(PUSH)
+  status  NotificationStatus  @default(PENDING)
+
+  title   String
+  message String
+  data    Json?
+
+  scheduledAt DateTime?
+  sentAt      DateTime?
+  readAt      DateTime?
+  failureReason String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+  @@index([type])
+  @@index([channel])
+  @@index([status])
+  @@index([scheduledAt])
   @@index([createdAt])
 }

@@ -10,6 +10,8 @@ import { PharmaciesModule } from './pharmacies/pharmacies.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { ProfessionalsModule } from './professionals/professionals.module';
 import { TeleconsultationsModule } from './teleconsultations/teleconsultations.module';
+import { MedicalAccessModule } from './medical-access/medical-access.module';
+import { NotificationsModule } from './notifications/notifications.module';
 
 @Module({
   imports: [
@@ -26,6 +28,9 @@ import { TeleconsultationsModule } from './teleconsultations/teleconsultations.m
     TeleconsultationsModule,
     PharmaciesModule,
     MedicalRecordsModule,
+    MedicalAccessModule,
+    MedicalRecordsModule,
+    NotificationsModule,
   ],
 })
 export class AppModule {}

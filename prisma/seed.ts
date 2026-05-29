@@ -61,16 +61,6 @@ const pharmacies = [
       },
     ],
   },
-  {
-    name: 'Pharmacie Espérance',
-    phone: '+2250701000004',
-    city: 'Bouaké',
-    area: 'Commerce',
-    address: 'Quartier Commerce, Bouaké',
-    latitude: 7.690642,
-    longitude: -5.039057,
-    dutyPeriods: [],
-  },
 ];
 
 async function main() {

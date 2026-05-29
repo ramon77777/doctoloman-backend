@@ -1,5 +1,6 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import {
+  IsArray,
   IsBoolean,
   IsInt,
   IsOptional,
@@ -68,6 +69,14 @@ export class UpdateProfessionalProfileDto {
   @IsOptional()
   @IsString()
   bio?: string;
+
+  @ApiPropertyOptional({
+    example: ['Français', 'Anglais'],
+  })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  languages?: string[];
 
   @ApiPropertyOptional({
     example: '10 000 - 15 000 FCFA',

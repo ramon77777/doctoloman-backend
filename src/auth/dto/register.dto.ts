@@ -1,12 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { UserRole } from '@prisma/client';
-import {
-  IsEnum,
-  IsOptional,
-  IsString,
-  Matches,
-  MinLength,
-} from 'class-validator';
+import { IsEnum, IsOptional, IsString, MinLength } from 'class-validator';
 
 export class RegisterDto {
   @ApiProperty({
@@ -26,8 +20,11 @@ export class RegisterDto {
     example: 'MotDePasse123',
     minLength: 8,
   })
+  
   @IsString()
-  @MinLength(8)
+  @MinLength(8, {
+    message: 'Le mot de passe doit contenir au moins 8 caractères.',
+  })
   password!: string;
 
   @ApiPropertyOptional({

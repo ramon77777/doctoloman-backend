@@ -84,7 +84,10 @@ export class AuthService {
       );
     }
 
-    if (role === UserRole.PROFESSIONAL && !this.cleanText(dto.specialty ?? '')) {
+    if (
+      role === UserRole.PROFESSIONAL &&
+      !this.cleanText(dto.specialty ?? '')
+    ) {
       throw new BadRequestException(
         'La spécialité est requise pour un compte professionnel.',
       );

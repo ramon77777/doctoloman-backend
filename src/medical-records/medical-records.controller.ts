@@ -148,6 +148,65 @@ export class MedicalRecordsController {
     return this.medicalRecordsService.listMine(user);
   }
 
+  @Get('professional/patients/:patientId')
+  @ApiOperation({
+    summary:
+      'Lister les documents médicaux d’un patient autorisé côté professionnel',
+  })
+  listForAuthorizedProfessional(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('patientId') patientId: string,
+  ) {
+    return this.medicalRecordsService.listForAuthorizedProfessional(
+      user,
+      patientId,
+    );
+  }
+
+  @Get('professional/patients/:patientId/:recordId')
+  @ApiOperation({
+    summary:
+      'Récupérer le détail d’un document médical patient côté professionnel autorisé',
+  })
+  findForAuthorizedProfessional(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('patientId') patientId: string,
+    @Param('recordId') recordId: string,
+  ) {
+    return this.medicalRecordsService.findForAuthorizedProfessional(
+      user,
+      patientId,
+      recordId,
+    );
+  }
+
+  @Get('professional/patients/:patientId/:recordId/download')
+  @ApiOperation({
+    summary:
+      'Télécharger un document médical patient côté professionnel autorisé',
+  })
+  async downloadForAuthorizedProfessional(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('patientId') patientId: string,
+    @Param('recordId') recordId: string,
+    @Res() response: Response,
+  ) {
+    const { record, absolutePath } =
+      await this.medicalRecordsService.getProfessionalDownloadInfo(
+        user,
+        patientId,
+        recordId,
+      );
+
+    response.setHeader('Content-Type', record.mimeType);
+    response.setHeader(
+      'Content-Disposition',
+      `attachment; filename="${encodeURIComponent(record.originalFileName)}"`,
+    );
+
+    return response.sendFile(absolutePath);
+  }
+
   @Get(':id')
   @ApiOperation({
     summary: 'Récupérer le détail d’un document médical',

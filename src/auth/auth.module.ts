@@ -16,8 +16,7 @@ import { JwtAuthGuard } from './guards/jwt-auth.guard';
           configService.get<string>('JWT_SECRET') ??
           'dev-secret-change-me-before-production';
 
-        const expiresIn =
-          configService.get<string>('JWT_EXPIRES_IN') ?? '7d';
+        const expiresIn = configService.get<string>('JWT_EXPIRES_IN') ?? '7d';
 
         return {
           secret,

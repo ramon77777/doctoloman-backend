@@ -6,9 +6,10 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { UserRole } from '@prisma/client';
+
+import type { AuthenticatedUser } from '../auth/types/authenticated-user.type';
 import { PrismaService } from '../prisma/prisma.service';
 import { UpdatePatientProfileDto } from './dto/update-patient-profile.dto';
-import type { AuthenticatedUser } from '../auth/types/authenticated-user.type';
 
 @Injectable()
 export class PatientsService {
@@ -40,7 +41,9 @@ export class PatientsService {
         : this.cleanText(dto.lastName);
 
     const phone =
-      dto.phone === undefined ? existing.phone : this.normalizePhoneCi(dto.phone);
+      dto.phone === undefined
+        ? existing.phone
+        : this.normalizePhoneCi(dto.phone);
 
     if (!firstName) {
       throw new BadRequestException('Prénom requis.');
@@ -59,6 +62,22 @@ export class PatientsService {
         'Format téléphone invalide. Exemple : +2250700000001.',
       );
     }
+
+    const emergencyContactPhone =
+      dto.emergencyContactPhone === undefined
+        ? existing.emergencyContactPhone
+        : this.optionalPhone(dto.emergencyContactPhone);
+
+    if (emergencyContactPhone && !this.isValidCiPhone(emergencyContactPhone)) {
+      throw new BadRequestException(
+        'Format téléphone du contact d’urgence invalide. Exemple : +2250700000002.',
+      );
+    }
+
+    const birthDate =
+      dto.birthDate === undefined
+        ? existing.birthDate
+        : this.parseOptionalDate(dto.birthDate);
 
     const phoneOwner = await this.prisma.user.findUnique({
       where: {
@@ -94,6 +113,50 @@ export class PatientsService {
           firstName,
           lastName,
           phone,
+
+          city:
+            dto.city === undefined
+              ? existing.city
+              : this.optionalText(dto.city),
+
+          district:
+            dto.district === undefined
+              ? existing.district
+              : this.optionalText(dto.district),
+
+          address:
+            dto.address === undefined
+              ? existing.address
+              : this.optionalText(dto.address),
+
+          birthDate,
+
+          gender:
+            dto.gender === undefined
+              ? existing.gender
+              : this.optionalText(dto.gender),
+
+          bloodGroup:
+            dto.bloodGroup === undefined
+              ? existing.bloodGroup
+              : this.optionalText(dto.bloodGroup),
+
+          allergies:
+            dto.allergies === undefined
+              ? existing.allergies
+              : this.optionalMultilineText(dto.allergies),
+
+          medicalNotes:
+            dto.medicalNotes === undefined
+              ? existing.medicalNotes
+              : this.optionalMultilineText(dto.medicalNotes),
+
+          emergencyContactName:
+            dto.emergencyContactName === undefined
+              ? existing.emergencyContactName
+              : this.optionalText(dto.emergencyContactName),
+
+          emergencyContactPhone,
         },
       });
     });
@@ -175,12 +238,49 @@ export class PatientsService {
     return digits;
   }
 
+  private optionalPhone(value?: string | null): string | null {
+    const normalized = this.normalizePhoneCi(value ?? '');
+    return normalized.length === 0 ? null : normalized;
+  }
+
   private isValidCiPhone(value: string): boolean {
     return /^\+225\d{10}$/.test(value);
   }
 
   private cleanText(value: string): string {
     return value.trim().replace(/\s+/g, ' ');
+  }
+
+  private optionalText(value?: string | null): string | null {
+    const cleaned = this.cleanText(value ?? '');
+    return cleaned.length === 0 ? null : cleaned;
+  }
+
+  private optionalMultilineText(value?: string | null): string | null {
+    const cleaned = (value ?? '')
+      .trim()
+      .replace(/[ \t]+/g, ' ')
+      .replace(/\n{3,}/g, '\n\n');
+
+    return cleaned.length === 0 ? null : cleaned;
+  }
+
+  private parseOptionalDate(value?: string | null): Date | null {
+    const raw = (value ?? '').trim();
+
+    if (!raw) {
+      return null;
+    }
+
+    const parsed = new Date(raw);
+
+    if (Number.isNaN(parsed.getTime())) {
+      throw new BadRequestException(
+        'Date de naissance invalide. Format attendu : YYYY-MM-DD.',
+      );
+    }
+
+    return parsed;
   }
 
   private buildFullName(firstName: string, lastName: string): string {
