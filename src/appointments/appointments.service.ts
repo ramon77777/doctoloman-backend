@@ -307,6 +307,204 @@ export class AppointmentsService {
     };
   }
 
+  async getByIdForCurrentUser(
+    currentUser: AuthenticatedUser,
+    appointmentId: string,
+  ) {
+    const id = this.cleanText(appointmentId);
+
+    if (!id) {
+      throw new BadRequestException('Identifiant rendez-vous invalide.');
+    }
+
+    const appointment = await this.prisma.appointment.findUnique({
+      where: { id },
+      include: this.appointmentInclude(),
+    });
+
+    if (!appointment) {
+      throw new NotFoundException('Rendez-vous introuvable.');
+    }
+
+    if (currentUser.role === UserRole.ADMIN) {
+      return {
+        appointment,
+      };
+    }
+
+    if (currentUser.role === UserRole.PATIENT) {
+      const currentPatientPhone = this.normalizePhoneCi(currentUser.phone);
+      const appointmentPatientPhone = this.normalizePhoneCi(
+        appointment.patientPhone,
+      );
+
+      if (currentPatientPhone !== appointmentPatientPhone) {
+        throw new ForbiddenException(
+          'Vous ne pouvez consulter que vos propres rendez-vous.',
+        );
+      }
+
+      return {
+        appointment,
+      };
+    }
+
+    if (currentUser.role === UserRole.PROFESSIONAL) {
+      const profile = await this.prisma.professionalProfile.findUnique({
+        where: {
+          userId: currentUser.id,
+        },
+        select: {
+          id: true,
+        },
+      });
+
+      if (!profile) {
+        throw new NotFoundException('Profil professionnel introuvable.');
+      }
+
+      if (profile.id !== appointment.professionalId) {
+        throw new ForbiddenException(
+          'Ce rendez-vous n’appartient pas à votre profil professionnel.',
+        );
+      }
+
+      return {
+        appointment,
+      };
+    }
+
+    throw new ForbiddenException('Action non autorisée.');
+  }
+
+  async getAvailableSlots(
+    currentUser: AuthenticatedUser,
+    query: {
+      professionalId?: string;
+      day?: string;
+      reason?: string;
+    },
+  ) {
+    if (currentUser.role !== UserRole.PATIENT) {
+      throw new ForbiddenException(
+        'Seul un compte patient peut consulter les créneaux disponibles.',
+      );
+    }
+
+    const professionalId = this.cleanText(query.professionalId ?? '');
+    const reasonLabel = this.cleanText(query.reason ?? '');
+    const day = this.parseDateOnly(query.day ?? '');
+
+    if (!professionalId) {
+      throw new BadRequestException('Professionnel requis.');
+    }
+
+    if (!reasonLabel) {
+      throw new BadRequestException('Motif requis.');
+    }
+
+    if (!day) {
+      throw new BadRequestException('Date invalide.');
+    }
+
+    const professional = await this.prisma.professionalProfile.findUnique({
+      where: { id: professionalId },
+      include: {
+        appointmentReasons: {
+          where: { isActive: true },
+          orderBy: { position: 'asc' },
+        },
+        schedules: {
+          include: {
+            slots: {
+              orderBy: { position: 'asc' },
+            },
+          },
+        },
+      },
+    });
+
+    if (!professional) {
+      throw new NotFoundException('Professionnel introuvable.');
+    }
+
+    const reason = professional.appointmentReasons.find(
+      (item) =>
+        this.normalizeLoose(item.label) === this.normalizeLoose(reasonLabel),
+    );
+
+    if (!reason) {
+      throw new BadRequestException(
+        'Motif indisponible pour ce professionnel.',
+      );
+    }
+
+    const weekday = this.weekdayFromDate(day);
+    const schedule = professional.schedules.find(
+      (item) => item.weekday === weekday,
+    );
+
+    if (!schedule || !schedule.isOpen) {
+      return {
+        items: [],
+        count: 0,
+        professionalId,
+        day,
+        reason: reason.label,
+        durationMinutes: reason.durationMinutes,
+      };
+    }
+
+    const reservedAppointments = await this.prisma.appointment.findMany({
+      where: {
+        professionalId,
+        day,
+        status: {
+          in: [AppointmentStatus.PENDING, AppointmentStatus.CONFIRMED],
+        },
+      },
+      select: {
+        slot: true,
+      },
+    });
+
+    const reservedSlots = new Set(
+      reservedAppointments.map((appointment) => appointment.slot),
+    );
+
+    const items = schedule.slots
+      .filter((slot) => {
+        const startMinutes = this.toMinutes(slot.startTime);
+        const endMinutes = startMinutes + reason.durationMinutes;
+        const scheduleEndMinutes = this.toMinutes(slot.endTime);
+
+        return endMinutes <= scheduleEndMinutes;
+      })
+      .filter((slot) => !reservedSlots.has(slot.startTime))
+      .filter((slot) => {
+        const scheduledAt = this.combineDateAndSlot(day, slot.startTime);
+
+        return (
+          scheduledAt.getTime() >
+          Date.now() + MINIMUM_LEAD_TIME_MINUTES * 60 * 1000
+        );
+      })
+      .map((slot) => ({
+        startTime: slot.startTime,
+        endTime: slot.endTime,
+        position: slot.position,
+      }));
+
+    return {
+      items,
+      count: items.length,
+      professionalId,
+      day,
+      reason: reason.label,
+      durationMinutes: reason.durationMinutes,
+    };
+  }
+
   async reschedule(
     currentUser: AuthenticatedUser,
     appointmentId: string,
@@ -460,6 +658,10 @@ export class AppointmentsService {
         include: this.appointmentInclude(),
       });
     });
+
+    await this.notifyProfessionalAppointmentRescheduledByPatient(
+      updatedAppointment,
+    );
 
     return {
       appointment: updatedAppointment,
@@ -673,7 +875,7 @@ export class AppointmentsService {
       },
     });
   }
-  
+
   private async notifyPatientAppointmentStatusChanged(
     appointment: {
       id: string;
@@ -742,6 +944,44 @@ export class AppointmentsService {
         },
       });
     }
+  }
+
+  private async notifyProfessionalAppointmentRescheduledByPatient(appointment: {
+    id: string;
+    professionalId: string;
+    patientName: string;
+    patientPhone: string;
+    day: Date;
+    slot: string;
+    reason: string;
+    professional?: {
+      userId?: string | null;
+      displayName?: string | null;
+    } | null;
+  }) {
+    const professionalUserId =
+      appointment.professional?.userId ??
+      (await this.findProfessionalUserId(appointment.professionalId));
+
+    if (!professionalUserId) {
+      return;
+    }
+
+    await this.safeCreateNotification({
+      userId: professionalUserId,
+      type: NotificationType.APPOINTMENT_REQUESTED,
+      title: 'Docto’Loman',
+      message: `${appointment.patientName} a reprogrammé son rendez-vous. Une nouvelle confirmation est requise.`,
+      data: {
+        appointmentId: appointment.id,
+        status: AppointmentStatus.PENDING,
+        patientName: appointment.patientName,
+        patientPhone: appointment.patientPhone,
+        reason: appointment.reason,
+        day: appointment.day.toISOString(),
+        slot: appointment.slot,
+      },
+    });
   }
 
   private async findProfessionalUserId(professionalId: string) {

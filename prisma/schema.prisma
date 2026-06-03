@@ -12,6 +12,19 @@ enum UserRole {
   ADMIN
 }
 
+enum PasswordResetRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  COMPLETED
+  CANCELLED
+}
+
+enum PasswordResetRequestAccountType {
+  PATIENT
+  PROFESSIONAL
+}
+
 enum AppointmentStatus {
   PENDING
   CONFIRMED
@@ -81,12 +94,13 @@ enum NotificationType {
 }
 
 model User {
-  id           String   @id @default(uuid())
-  phone        String   @unique
-  name         String
-  passwordHash String
-  role         UserRole
-  isActive     Boolean  @default(true)
+  id                 String   @id @default(uuid())
+  phone              String   @unique
+  name               String
+  passwordHash       String
+  role               UserRole
+  isActive           Boolean  @default(true)
+  mustChangePassword Boolean  @default(false)
 
   patientProfile      PatientProfile?
   professionalProfile ProfessionalProfile?
@@ -95,14 +109,46 @@ model User {
   pushDevices   PushDevice[]
   notifications AppNotification[]
 
+  passwordResetRequests PasswordResetRequest[]
+
   medicalAccessesGranted MedicalAccess[]      @relation("MedicalAccessPatient")
   medicalAccessAudits    MedicalAccessAudit[] @relation("MedicalAccessAuditPatient")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-
   @@index([role])
+}
+
+model PasswordResetRequest {
+  id String @id @default(uuid())
+
+  requestedAccountType PasswordResetRequestAccountType
+
+  fullName String
+  phone    String
+  message  String?
+
+  status PasswordResetRequestStatus @default(PENDING)
+
+  matchedUserId String?
+  matchedUser   User?   @relation(fields: [matchedUserId], references: [id], onDelete: SetNull)
+
+  adminNote String?
+
+  temporaryPasswordGeneratedAt DateTime?
+  reviewedAt                   DateTime?
+  completedAt                  DateTime?
+  rejectedAt                   DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([phone])
+  @@index([status])
+  @@index([requestedAccountType])
+  @@index([matchedUserId])
+  @@index([createdAt])
 }
 
 model PatientProfile {
@@ -115,9 +161,9 @@ model PatientProfile {
   lastName  String
   phone     String
 
-  city      String?
-  district  String?
-  address   String?
+  city     String?
+  district String?
+  address  String?
 
   birthDate DateTime?
   gender    String?
@@ -149,7 +195,7 @@ model ProfessionalProfile {
   bio                  String?
   languages            String[] @default(["Français"])
   consultationFeeLabel String?
-  isVerified           Boolean @default(false)
+  isVerified           Boolean  @default(false)
 
   appointmentDurationMinutes Int @default(30)
 
@@ -431,9 +477,9 @@ model PushDevice {
   deviceName String?
   appVersion String?
 
-  isActive Boolean   @default(true)
-  lastSeenAt DateTime @default(now())
-  revokedAt DateTime?
+  isActive   Boolean   @default(true)
+  lastSeenAt DateTime  @default(now())
+  revokedAt  DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -457,9 +503,9 @@ model AppNotification {
   message String
   data    Json?
 
-  scheduledAt DateTime?
-  sentAt      DateTime?
-  readAt      DateTime?
+  scheduledAt   DateTime?
+  sentAt        DateTime?
+  readAt        DateTime?
   failureReason String?
 
   createdAt DateTime @default(now())

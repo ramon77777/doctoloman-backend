@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Patch, Post, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { AuthService } from './auth.service';
 import { CurrentUser } from './decorators/current-user.decorator';
@@ -6,6 +6,8 @@ import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import type { AuthenticatedUser } from './types/authenticated-user.type';
+import { CreatePasswordResetRequestDto } from './dto/create-password-reset-request.dto';
+import { ChangePasswordDto } from './dto/change-password.dto';
 
 @ApiTags('Auth')
 @Controller('auth')
@@ -36,5 +38,27 @@ export class AuthController {
   })
   me(@CurrentUser() user: AuthenticatedUser) {
     return this.authService.me(user);
+  }
+
+  @Patch('me/password')
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Modifier mon mot de passe',
+  })
+  @UseGuards(JwtAuthGuard)
+  changeMyPassword(
+    @CurrentUser() user: AuthenticatedUser | null,
+    @Body() dto: ChangePasswordDto,
+  ) {
+    return this.authService.changeMyPassword(user, dto);
+  }
+
+  @Post('password-reset-requests')
+  @ApiOperation({
+    summary:
+      'Créer une demande publique de réinitialisation de mot de passe patient/professionnel',
+  })
+  createPasswordResetRequest(@Body() dto: CreatePasswordResetRequestDto) {
+    return this.authService.createPasswordResetRequest(dto);
   }
 }

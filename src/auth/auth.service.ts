@@ -4,9 +4,9 @@ import {
   Injectable,
   UnauthorizedException,
 } from '@nestjs/common';
+import { PasswordResetRequestAccountType, UserRole } from '@prisma/client';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
-import { UserRole } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
 import { PrismaService } from '../prisma/prisma.service';
 import { LoginDto } from './dto/login.dto';
@@ -233,12 +233,209 @@ export class AuthService {
     };
   }
 
+  async changeMyPassword(
+    currentUser: AuthenticatedUser | null,
+    dto: {
+      currentPassword: string;
+      newPassword: string;
+      confirmPassword: string;
+    },
+  ) {
+    if (!currentUser?.id) {
+      throw new UnauthorizedException('Session invalide.');
+    }
+
+    const currentPassword = dto.currentPassword ?? '';
+    const newPassword = dto.newPassword ?? '';
+    const confirmPassword = dto.confirmPassword ?? '';
+
+    if (!currentPassword) {
+      throw new BadRequestException('Mot de passe actuel requis.');
+    }
+
+    if (!newPassword || newPassword.length < 8) {
+      throw new BadRequestException(
+        'Le nouveau mot de passe doit contenir au moins 8 caractères.',
+      );
+    }
+
+    if (newPassword !== confirmPassword) {
+      throw new BadRequestException(
+        'La confirmation du mot de passe ne correspond pas.',
+      );
+    }
+
+    if (currentPassword === newPassword) {
+      throw new BadRequestException(
+        'Le nouveau mot de passe doit être différent du mot de passe actuel.',
+      );
+    }
+
+    const user = await this.prisma.user.findUnique({
+      where: {
+        id: currentUser.id,
+      },
+      include: {
+        patientProfile: true,
+        professionalProfile: {
+          include: {
+            appointmentReasons: {
+              orderBy: {
+                position: 'asc',
+              },
+            },
+            schedules: {
+              orderBy: {
+                weekday: 'asc',
+              },
+              include: {
+                slots: {
+                  orderBy: {
+                    position: 'asc',
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    if (!user || !user.isActive) {
+      throw new UnauthorizedException('Utilisateur introuvable.');
+    }
+
+    const passwordOk = await bcrypt.compare(currentPassword, user.passwordHash);
+
+    if (!passwordOk) {
+      throw new BadRequestException('Le mot de passe actuel est incorrect.');
+    }
+
+    const passwordHash = await bcrypt.hash(newPassword, 12);
+
+    const updatedUser = await this.prisma.user.update({
+      where: {
+        id: user.id,
+      },
+      data: {
+        passwordHash,
+        mustChangePassword: false,
+      },
+      include: {
+        patientProfile: true,
+        professionalProfile: {
+          include: {
+            appointmentReasons: {
+              orderBy: {
+                position: 'asc',
+              },
+            },
+            schedules: {
+              orderBy: {
+                weekday: 'asc',
+              },
+              include: {
+                slots: {
+                  orderBy: {
+                    position: 'asc',
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    return {
+      message: 'Votre mot de passe a été modifié avec succès.',
+      user: this.toSafeUser(updatedUser),
+    };
+  }
+
+  async createPasswordResetRequest(dto: {
+    accountType: 'PATIENT' | 'PROFESSIONAL';
+    fullName: string;
+    phone: string;
+    message?: string;
+  }) {
+    const requestedAccountType =
+      dto.accountType === 'PATIENT'
+        ? PasswordResetRequestAccountType.PATIENT
+        : PasswordResetRequestAccountType.PROFESSIONAL;
+
+    const expectedRole =
+      dto.accountType === 'PATIENT' ? UserRole.PATIENT : UserRole.PROFESSIONAL;
+
+    const phone = this.normalizePhoneCi(dto.phone);
+    const fullName = this.cleanText(dto.fullName);
+    const message = this.optionalMultilineText(dto.message);
+
+    if (!fullName) {
+      throw new BadRequestException('Nom complet requis.');
+    }
+
+    if (!phone || !this.isValidCiPhone(phone)) {
+      throw new BadRequestException(
+        'Format téléphone invalide. Exemple : +2250700000001.',
+      );
+    }
+
+    const matchedUser = await this.findPasswordResetMatchedUser({
+      phone,
+      fullName,
+      expectedRole,
+    });
+
+    const recentPendingRequest =
+      await this.prisma.passwordResetRequest.findFirst({
+        where: {
+          phone,
+          requestedAccountType,
+          status: 'PENDING',
+          createdAt: {
+            gte: new Date(Date.now() - 30 * 60 * 1000),
+          },
+        },
+        orderBy: {
+          createdAt: 'desc',
+        },
+      });
+
+    if (recentPendingRequest) {
+      return {
+        message:
+          'Une demande récente existe déjà. Elle sera examinée par l’administration dans un délai indicatif de 24 à 48 heures ouvrées.',
+        delay: '24 à 48 heures ouvrées',
+      };
+    }
+
+    await this.prisma.passwordResetRequest.create({
+      data: {
+        requestedAccountType,
+        fullName,
+        phone,
+        message,
+        matchedUserId: matchedUser?.id ?? null,
+      },
+    });
+
+    return {
+      message:
+        'Votre demande de réinitialisation a bien été transmise. Pour des raisons de sécurité, elle sera vérifiée par l’administration avant toute action.',
+      delay: '24 à 48 heures ouvrées',
+      instruction:
+        'Si votre demande est validée, l’administration vous communiquera la procédure ou un mot de passe temporaire selon les règles internes de Docto’Loman.',
+    };
+  }
+
   private async buildAuthResponse(user: {
     id: string;
     phone: string;
     name: string;
     role: UserRole;
     isActive: boolean;
+    mustChangePassword?: boolean;
     patientProfile?: unknown;
     professionalProfile?: unknown;
   }) {
@@ -268,6 +465,7 @@ export class AuthService {
     name: string;
     role: UserRole;
     isActive: boolean;
+    mustChangePassword?: boolean;
     patientProfile?: unknown;
     professionalProfile?: unknown;
   }) {
@@ -277,6 +475,7 @@ export class AuthService {
       name: user.name,
       role: user.role,
       isActive: user.isActive,
+      mustChangePassword: user.mustChangePassword ?? false,
       patientProfile: user.patientProfile ?? null,
       professionalProfile: user.professionalProfile ?? null,
     };
@@ -326,5 +525,77 @@ export class AuthService {
   private extractLastName(fullName: string): string {
     const parts = this.cleanText(fullName).split(' ');
     return parts.length > 1 ? parts.slice(1).join(' ') : '';
+  }
+
+  private async findPasswordResetMatchedUser(input: {
+    phone: string;
+    fullName: string;
+    expectedRole: UserRole;
+  }) {
+    const user = await this.prisma.user.findFirst({
+      where: {
+        phone: input.phone,
+        role: input.expectedRole,
+        isActive: true,
+      },
+      select: {
+        id: true,
+        name: true,
+        role: true,
+        patientProfile: {
+          select: {
+            firstName: true,
+            lastName: true,
+          },
+        },
+        professionalProfile: {
+          select: {
+            displayName: true,
+          },
+        },
+      },
+    });
+
+    if (!user) {
+      return null;
+    }
+
+    const submittedName = this.normalizeNameForComparison(input.fullName);
+
+    const candidateNames = [
+      user.name,
+      user.patientProfile
+        ? `${user.patientProfile.firstName} ${user.patientProfile.lastName}`
+        : '',
+      user.professionalProfile?.displayName ?? '',
+    ]
+      .map((name) => this.normalizeNameForComparison(name))
+      .filter(Boolean);
+
+    const hasMatchingName = candidateNames.some((candidateName) => {
+      return (
+        candidateName === submittedName ||
+        candidateName.includes(submittedName) ||
+        submittedName.includes(candidateName)
+      );
+    });
+
+    return hasMatchingName ? user : null;
+  }
+
+  private optionalMultilineText(value?: string | null): string | null {
+    const cleaned = (value ?? '')
+      .trim()
+      .replace(/[ \t]+/g, ' ')
+      .replace(/\n{3,}/g, '\n\n');
+
+    return cleaned.length > 0 ? cleaned : null;
+  }
+
+  private normalizeNameForComparison(value: string): string {
+    return this.cleanText(value)
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '');
   }
 }

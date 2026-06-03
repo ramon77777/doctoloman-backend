@@ -86,6 +86,35 @@ export class AppointmentsController {
     return this.appointmentsService.listProfessionalMine(user);
   }
 
+  @Get('availability')
+  @ApiOperation({
+    summary:
+      'Lister les créneaux disponibles d’un professionnel pour une date et un motif',
+  })
+  @ApiQuery({ name: 'professionalId', required: true })
+  @ApiQuery({ name: 'day', required: true })
+  @ApiQuery({ name: 'reason', required: true })
+  availability(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query('professionalId') professionalId: string,
+    @Query('day') day: string,
+    @Query('reason') reason: string,
+  ) {
+    return this.appointmentsService.getAvailableSlots(user, {
+      professionalId,
+      day,
+      reason,
+    });
+  }
+
+  @Get(':id')
+  @ApiOperation({
+    summary: 'Récupérer le détail d’un rendez-vous selon le rôle connecté',
+  })
+  getById(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
+    return this.appointmentsService.getByIdForCurrentUser(user, id);
+  }
+
   @Patch(':id/reschedule')
   @ApiOperation({
     summary:
