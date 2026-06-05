@@ -4,6 +4,13 @@ import { NestFactory } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { AppModule } from './app.module';
 
+function parseCorsOrigins(value?: string) {
+  return (value ?? '')
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+}
+
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
@@ -11,11 +18,19 @@ async function bootstrap() {
 
   const port = Number(configService.get<string>('PORT') ?? 3000);
   const nodeEnv = configService.get<string>('NODE_ENV') ?? 'development';
+  const corsOrigins = parseCorsOrigins(
+    configService.get<string>('CORS_ORIGINS'),
+  );
 
   app.setGlobalPrefix('api/v1');
 
   app.enableCors({
-    origin: true,
+    origin:
+      corsOrigins.length > 0
+        ? corsOrigins
+        : nodeEnv === 'production'
+          ? false
+          : true,
     credentials: true,
   });
 
@@ -30,7 +45,7 @@ async function bootstrap() {
   const swaggerConfig = new DocumentBuilder()
     .setTitle("Docto'Loman API")
     .setDescription(
-      "API backend Docto'Loman : application mobile, future application web et administration.",
+      "API backend Docto'Loman : application mobile, application web et administration.",
     )
     .setVersion('0.1.0')
     .addBearerAuth()
@@ -44,12 +59,12 @@ async function bootstrap() {
     },
   });
 
-  await app.listen(port);
+  await app.listen(port, '0.0.0.0');
 
   console.log(
-    `Docto'Loman API running on http://localhost:${port}/api/v1/health`,
+    `Docto'Loman API running on port ${port} with prefix /api/v1`,
   );
-  console.log(`Swagger running on http://localhost:${port}/docs`);
+  console.log(`Swagger running on /docs`);
   console.log(`Environment: ${nodeEnv}`);
 }
 
