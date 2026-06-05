@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   UnauthorizedException,
 } from '@nestjs/common';
@@ -426,6 +427,68 @@ export class AuthService {
       delay: '24 à 48 heures ouvrées',
       instruction:
         'Si votre demande est validée, l’administration vous communiquera la procédure ou un mot de passe temporaire selon les règles internes de Docto’Loman.',
+    };
+  }
+
+  async bootstrapAdmin(dto: {
+    secret: string;
+    name: string;
+    phone: string;
+    password: string;
+  }) {
+    const expectedSecret = this.configService.get<string>(
+      'BOOTSTRAP_ADMIN_SECRET',
+    );
+
+    if (!expectedSecret || dto.secret !== expectedSecret) {
+      throw new ForbiddenException('Opération non autorisée.');
+    }
+
+    const phone = this.normalizePhoneCi(dto.phone);
+    const name = this.cleanText(dto.name);
+
+    if (!phone || !this.isValidCiPhone(phone)) {
+      throw new BadRequestException(
+        'Format téléphone invalide. Exemple : +2250700000099.',
+      );
+    }
+
+    if (!name) {
+      throw new BadRequestException('Nom requis.');
+    }
+
+    const existingUser = await this.prisma.user.findUnique({
+      where: { phone },
+    });
+
+    if (existingUser) {
+      if (existingUser.role !== UserRole.ADMIN) {
+        throw new ConflictException(
+          'Un compte non administrateur existe déjà avec ce téléphone.',
+        );
+      }
+
+      return {
+        message: 'Le compte administrateur existe déjà.',
+        user: this.toSafeUser(existingUser),
+      };
+    }
+
+    const passwordHash = await bcrypt.hash(dto.password, 12);
+
+    const user = await this.prisma.user.create({
+      data: {
+        phone,
+        name,
+        passwordHash,
+        role: UserRole.ADMIN,
+        isActive: true,
+      },
+    });
+
+    return {
+      message: 'Compte administrateur créé avec succès.',
+      user: this.toSafeUser(user),
     };
   }
 

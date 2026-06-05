@@ -9,10 +9,20 @@ import type { AuthenticatedUser } from './types/authenticated-user.type';
 import { CreatePasswordResetRequestDto } from './dto/create-password-reset-request.dto';
 import { ChangePasswordDto } from './dto/change-password.dto';
 
+import { BootstrapAdminDto } from './dto/bootstrap-admin.dto';
+
 @ApiTags('Auth')
 @Controller('auth')
 export class AuthController {
   constructor(private readonly authService: AuthService) {}
+
+  @Post('bootstrap-admin')
+  @ApiOperation({
+    summary: 'Créer le premier administrateur via secret de déploiement',
+  })
+  bootstrapAdmin(@Body() dto: BootstrapAdminDto) {
+    return this.authService.bootstrapAdmin(dto);
+  }
 
   @Post('register')
   @ApiOperation({
