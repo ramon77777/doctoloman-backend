@@ -23,7 +23,6 @@
     "prisma:migrate": "prisma migrate dev",
     "prisma:deploy": "prisma migrate deploy",
     "prisma:studio": "prisma studio",
-    "postinstall": "prisma generate",
     "deploy:migrate": "prisma migrate deploy"
   },
   "dependencies": {
